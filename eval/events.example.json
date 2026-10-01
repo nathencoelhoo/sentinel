@@ -1,0 +1,10 @@
+{
+  "_note": "Day-level APPROXIMATE windows (UTC) for well-known stress events. Latency is measured from `start` unless you add an `onset`; refine onsets by hand from the price data and state that they were labelled with hindsight. Symbol availability on data.binance.vision varies (e.g. LUNAUSDT may 404; old LUNA was renamed LUNC).",
+  "events": [
+    { "name": "covid-black-thursday", "symbol": "BTCUSDT", "start": "2020-03-12T00:00:00Z", "end": "2020-03-13T00:00:00Z" },
+    { "name": "terra-luna-collapse", "symbol": "BTCUSDT", "start": "2022-05-09T00:00:00Z", "end": "2022-05-13T00:00:00Z" },
+    { "name": "terra-luna-collapse", "symbol": "LUNAUSDT", "start": "2022-05-09T00:00:00Z", "end": "2022-05-13T00:00:00Z" },
+    { "name": "ftx-collapse", "symbol": "BTCUSDT", "start": "2022-11-08T00:00:00Z", "end": "2022-11-10T00:00:00Z" },
+    { "name": "ftx-collapse", "symbol": "FTTUSDT", "start": "2022-11-06T00:00:00Z", "end": "2022-11-10T00:00:00Z" }
+  ]
+}
