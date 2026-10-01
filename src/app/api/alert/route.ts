@@ -23,6 +23,11 @@ export async function POST(req: Request) {
   }
   const alert = validateAlert(body);
   if (!alert) return NextResponse.json({ error: 'invalid payload' }, { status: 400 });
-  const sent = await dispatchAlert(alert, process.env);
+  const sent = await dispatchAlert(alert, {
+    ALERT_API_KEY: process.env.ALERT_API_KEY,
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
+    DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL,
+  });
   return NextResponse.json({ sent });
 }
