@@ -1,0 +1,52 @@
+name: sentinel
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: unpack, then check, then replay
+        type: choice
+        options: [unpack, check, replay]
+        default: unpack
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unpack sentinel.zip into the repo
+        if: inputs.action == 'unpack'
+        run: |
+          set -e
+          unzip -q -o sentinel.zip -d /tmp/s
+          rm -rf /tmp/s/sentinel/.github
+          cp -a /tmp/s/sentinel/. .
+          rm sentinel.zip
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Add SENTINEL project"
+          git push
+      - name: Install
+        if: inputs.action != 'unpack'
+        run: npm install
+      - name: Tests and build
+        if: inputs.action == 'check'
+        run: |
+          npm test
+          npm run build
+      - name: Replay on real data
+        if: inputs.action == 'replay'
+        run: |
+          cp eval/events.example.json eval/events.json
+          npm run eval:fetch -- --events eval/events.json
+          npm run eval -- --events eval/events.json --ablate
+          cat results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: inputs.action == 'replay'
+        with:
+          name: replay-results
+          path: results
