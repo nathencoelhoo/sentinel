@@ -1,0 +1,36 @@
+name: study
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unpack update zip
+        run: |
+          if [ -f sentinel-update.zip ]; then
+            unzip -q -o sentinel-update.zip -d /tmp/u
+            cp -a /tmp/u/. .
+            rm sentinel-update.zip
+            git config user.name github-actions
+            git config user.email actions@github.com
+            git add -A
+            git commit -m "Add pre-registered study" || true
+            git push
+          fi
+      - run: npm install
+      - run: npm test
+      - run: node eval/study-select.ts --config eval/study.json --out eval/events.study.json
+      - run: node eval/fetch.ts --events eval/events.study.json --warmup-days 3 --tail-hours 12
+      - run: node eval/study-run.ts --config eval/study.json --events eval/events.study.json --ablate
+      - run: cat results/study/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: study-results
+          path: results
