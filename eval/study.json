@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "_note": "PRE-REGISTERED DESIGN. Committed before any study result exists. Do not edit after seeing results; if you must, bump `version`, say why, and treat earlier results as exploratory.",
+  "symbols": ["BTCUSDT", "ETHUSDT"],
+  "from": "2020-01-01",
+  "to": "2026-08-31",
+  "topPerSymbol": 20,
+  "minSeparationDays": 3,
+  "onsetMovePct": 1.0,
+  "detectLeadMin": 30,
+  "detectLagMin": 120,
+  "warmupDays": 3,
+  "tailHours": 12,
+  "guardMinutes": 60,
+  "postGuardMinutes": 720,
+  "alarmsPerDay": 6,
+  "cooldownBars": 15,
+  "bootstrapResamples": 2000,
+  "randomReps": 1000,
+  "seed": 20261001,
+  "referenceMethod": "zscore_matched"
+}
