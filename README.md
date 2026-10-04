@@ -1,162 +1,86 @@
 # SENTINEL
 
-Real-time market anomaly detection: an ensemble of robust statistical detectors
-with adaptive false-alarm control, evaluated by a lookahead-free replay harness.
+Real-time anomaly detection for crypto markets, with a pre-registered evaluation of whether it actually works.
 
-**Research question:** can an ensemble of robust detectors flag regime breaks earlier
-and with fewer false alarms than a single z-score, *at an equal alarm budget*?
+**Live demo:** https://sentinel-one-phi.vercel.app &nbsp;·&nbsp; **Paper:** [docs/SENTINEL_paper.pdf](docs/SENTINEL_paper.pdf) &nbsp;·&nbsp; Research software, not financial advice.
 
-> **Status (milestone 2 of 3):** engine + replay harness (milestone 1) and now the live stack: tick->bar
-> aggregator, Binance/Coinbase feeds, Web Worker host, Next.js dashboard, alert route.
-> No real-market results have been produced yet; the only numbers so far are from synthetic data
-> and are a plumbing check, not evidence. **The Next.js UI has not been compiled or run yet** (see Limitations).
+## Headline result
+
+At a nominal alarm budget of 6 alerts/day, on 40 BTC/ETH stress days (2020 to 2026) chosen by a rule fixed in advance:
+
+- SENTINEL emitted **clearly fewer alerts** than an equally thresholded z-score: 4.8 vs 6.7 per quiet day (paired difference -1.86, 95% CI -2.31 to -1.42).
+- Event recall **did not clearly change** (-0.03, 95% CI -0.14 to +0.08).
+- **No evidence of earlier detection.** Online-learned weights were no better than fixed ones, and removing any single detector had no clear effect.
+- Recall above a random alerter at the same alert rate is small (+0.06) and unproven. The classic |z| > 3 rule reaches 0.82 recall, exactly what chance gives at its 14 alerts/day.
+
+The supported claim is about alert volume, not detection skill. Protocol, tables, limitations and the full event list are in the paper and in [docs/STUDY.md](docs/STUDY.md).
+
+## What is here
+
+- **Streaming engine** (TypeScript, causal, unit-tested): robust z-score, EWMA volatility ratio, CUSUM, Bayesian online changepoint detection, volume spike, and order-book imbalance (live only). Each statistic is normalised by a rolling empirical CDF, combined by a logistic ensemble (fixed prior or online-learned from delayed weak labels), and turned into alerts by per-symbol adaptive quantile thresholds with a cooldown and severity escalation. Cross-asset lead-lag tracking.
+- **Live dashboard** (Next.js; runs in your browser): Binance and Coinbase WebSockets, a Web Worker engine, price chart with anomaly score, heatmap across symbols, a "why did this fire" panel, and throughput / latency metrics.
+- **Alert route** (`/api/alert`): Telegram and Discord messages. Fails closed, validates input, plain text only.
+- **Replay and study harness**: a pre-registered evaluation with a random-alert chance baseline, cluster-bootstrap intervals and paired comparisons, run on GitHub Actions.
+- **57 automated tests**, including one asserting that two engines fed different futures give identical past outputs (no lookahead).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  B[Bar stream<br/>live WS or replay CSV] --> D
-  subgraph D[Detectors - causal, per symbol]
-    D1[Robust z MAD] --- D2[EWMA vol ratio] --- D3[CUSUM] --- D4[BOCPD] --- D5[Volume spike] --- D6[Order-book imbalance]
-  end
-  D --> E[Rolling ECDF -> surprise x = -ln 1-u]
-  E --> L[Logistic ensemble<br/>fixed prior or online-learned]
-  L --> T[Adaptive quantile threshold + cooldown]
-  T --> A[Alert + per-detector explanation]
-  L -. delayed weak labels .-> L
-  A --> C[Contagion: rolling corr + lead-lag]
+  WS1["Binance WebSocket: trades and depth"] --> P["parsers"]
+  WS2["Coinbase WebSocket: matches"] --> P
+  REST["REST history: about 1000 bars"] --> H
+  P --> Q["bounded queue, drop-oldest"]
+  Q --> A["bar aggregator: grace window, dedupe, gap fill"]
+  A --> H["host: one engine per symbol, contagion, metrics"]
+  H -->|postMessage| UI["Next.js dashboard"]
+  UI -->|"POST with key"| API["/api/alert"] --> TG["Telegram / Discord"]
 ```
 
-The same `SentinelEngine.update(bar)` runs live (in a Web Worker) and in
-replay, so there is no train/serve skew, and lookahead is structurally impossible
-(a unit test feeds two engines different futures and asserts identical past outputs).
+The same `SentinelEngine.update(bar)` runs live and in replay, so there is no train/serve skew.
 
-## Live stack (milestone 2)
+## Try it
 
-```mermaid
-flowchart LR
-  WS1[Binance WS<br/>trade + depth10@100ms] --> P[parsers]
-  WS2[Coinbase WS<br/>matches] --> P
-  REST[REST klines/candles<br/>backfill ~1000 bars] --> H
-  P --> Q[bounded queue<br/>drop-oldest backpressure]
-  Q --> A[BarAggregator<br/>grace window, dedupe, gap fill]
-  A --> H[SentinelHost<br/>engine per symbol + contagion + metrics]
-  H -->|postMessage| UI[Next.js dashboard<br/>chart, heatmap, explain, metrics]
-  UI -->|POST x-sentinel-key| API[/api/alert/] --> TG[Telegram / Discord]
-```
+- **Live:** open the demo and press **Start**. US users: pick *binance.us* in the header.
+- **Locally** (Node 22 or newer):
+  ```bash
+  npm install
+  npm run dev      # http://localhost:3000
+  npm test         # 57 tests
+  ```
+- **Deploy:** import the repo on Vercel (Next.js is detected automatically). The alert route stays disabled until you set `ALERT_API_KEY` (and Telegram or Discord variables, see `.env.example`).
 
-Everything heavy runs in a Web Worker. Reconnects use exponential backoff with jitter and a
-stale-connection watchdog; out-of-order and duplicate trades are handled in the aggregator;
-the queue drops oldest under overload and reports it in the metrics bar. 60 s bars are
-warm-started from REST history so the engine is ready immediately (shorter bars warm up live).
+## Reproduce the study
 
-### Run locally
-```bash
-npm install
-npm run dev        # http://localhost:3000, press Start
-```
-US users: pick "binance.us" in the header (binance.com is geo-blocked there).
+No local setup needed. In the repo open **Actions**, choose the **study** workflow and press **Run workflow**. It runs the tests, applies the event rule to Binance Vision daily data, downloads the 1-minute files for the 40 events, replays every method, and prints the tables on the run summary. The frozen parameters are in [`eval/study.json`](eval/study.json); the results record its hash and the commit.
 
-### Deploy: GitHub -> Vercel
-1. Push this repo to GitHub.
-2. vercel.com > Add New Project > import the repo (Next.js is auto-detected).
-3. Project Settings > Environment Variables: set `ALERT_API_KEY` (long random string) and the
-   Telegram and/or Discord variables from `.env.example`. Redeploy.
-4. In the deployed dashboard open "Alert rules", tick the box, paste the same `ALERT_API_KEY`.
+## Repository layout
 
-The alert route fails closed (503 without a key, 401 with a wrong one), validates input
-strictly, sends plain text only, and suppresses Discord mentions. All market data flows
-browser <-> exchanges directly; Vercel only serves the page and relays alerts.
+| Path | Contents |
+|---|---|
+| `src/engine/` | detectors, ensemble, thresholds, contagion, engine |
+| `src/feeds/` | aggregator, reconnecting socket, parsers, history, queue |
+| `src/worker/` | host and Web Worker entry |
+| `src/app/`, `src/components/`, `src/lib/` | dashboard and alert route |
+| `eval/` | replay harness, study selection and runner, statistics |
+| `tests/` | 57 unit and end-to-end tests |
+| `docs/` | study protocol and paper |
 
-## Method (details in source comments)
+## Limitations
 
-- **Detectors**: median/MAD robust z; fast/slow EWMA volatility ratio; two-sided
-  CUSUM on standardised returns; Bayesian online changepoint detection
-  (Normal-Gamma, Student-t predictive, mass on short run lengths); volume / rolling
-  median; robust z of L2 order-book imbalance (optional input).
-- **Calibration to a common scale**: each statistic -> rolling ECDF (queried before
-  insertion) -> surprise `x = -ln(1-u)`.
-- **Ensemble**: `p = sigmoid(b + sum_j w_j x_j)`. *Fixed*: hand-set prior
-  `p = sigmoid(1.5 (mean x - 3))`. *Learned*: online SGD with L2 pull to the prior,
-  `w >= 0`, trained on **delayed weak labels** (a |return| >= 4 sigma occurs within
-  the next 30 bars; applied only after those 30 bars have elapsed).
-- **Alerts**: threshold = rolling `(1 - rho)` quantile of past `p`, with
-  `rho = alarms_per_day * bar_seconds / 86400`, plus a cooldown with **severity escalation**:
-  inside a cooldown an alert still fires if the score beats the `(1 - rho/10)` quantile of the
-  past window (10x rarer than the alarm budget) and the previous alert's score.
-- **Contagion**: rolling return correlation and lead-lag cross-correlation of score series.
+- At the same nominal budget the methods produced different realised alert rates (4.8 vs 6.7 per day), so the alert-volume and recall results are not a like-for-like comparison. Matched-rate comparisons are the first item for v2.
+- The study's onset rule anchors on the UTC day open; in 22 of 40 events the onset falls within 30 minutes after midnight, which adds noise for every method.
+- The 40 events are the largest-range days, strongly correlated across BTC and ETH, so the study speaks to obvious shocks, not subtle regime changes.
+- The order-book detector could not be tested historically (no free historical level-2 data) and runs only in the live dashboard.
+- Alerts fire only while a dashboard tab is open. The pre-registration is a hashed commit in the author's own repository, not a third-party registry.
 
-## Run
+## Data, credits and licence
 
-```bash
-npm install
-npm test                 # 51 unit tests (node:test, no extra deps)
-npm run typecheck
-npm run eval:synth       # offline end-to-end replay on synthetic data
+- Historical data: [Binance Vision](https://data.binance.vision), licensed CC BY-NC-SA 4.0 for non-commercial use. Raw data is not included in this repository; results derived from it (including the paper's tables) are shared under the same licence. Please credit Binance Vision.
+- Live feeds use the public Binance and Coinbase market-data streams under their own terms. This project is not affiliated with or endorsed by Binance or Coinbase.
+- Charts use [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0; the attribution logo on the chart is required). Built with Next.js and React.
+- Keep any deployment non-commercial. Research software, not trading advice.
 
-npm run eval:fetch       # download 1m klines from data.binance.vision (pure Node, no `unzip` needed)
-npm run eval             # replay real stress events, writes results/summary.json + summary.md
-```
-Requires Node >= 22.18 (runs TypeScript natively).
+## What is next
 
-## Real-data replay (do this next)
-
-```bash
-cp eval/events.example.json eval/events.json     # then refine (see below)
-npm run eval:fetch -- --events eval/events.json  # ~100 KB per symbol-day, resumable, 404s are reported
-npm run eval -- --events eval/events.json --ablate
-```
-Outputs `results/summary.json` (full detail) and `results/summary.md` (paste-ready tables:
-summary, per-event latency matrix, leave-one-out ablations).
-
-Before you trust the numbers:
-1. **Refine `onset`** for each event from the price data (the example windows are whole days,
-   so latency is otherwise measured from midnight). State in the writeup that onsets were
-   labelled with hindsight, and label them *before* looking at any method's alerts.
-2. **Do not tune hyperparameters on these events.** Defaults are fixed; if you change anything,
-   say so and treat the events as no longer held out.
-3. Some symbol/date files may 404 (e.g. LUNAUSDT after the rename to LUNC). Drop or rename those events.
-4. The harness uses 3 days of warm-up before each event (`--warmup-days`) and measures false alarms
-   only in quiet periods (outside windows, a 60 min pre-guard and a 6 h post-guard).
-5. With 3-5 events there is no statistical significance; report case studies and ablation
-   *direction*, not p-values.
-
-## Evaluation protocol
-
-All methods run through the identical harness (`eval/harness.ts`) with hyperparameters
-fixed *before* looking at events. Baselines: `zscore_fixed3` (classic |z|>3) and
-`zscore_matched` (same statistic, same adaptive threshold and alarm budget as SENTINEL).
-Metrics: event recall, detection latency, false alarms/day in quiet periods, precision.
-
-## Known limitations (read before quoting any number)
-
-- **Cooldown masking (fixed in v0.1.1).** On synthetic data two false alarms 15 bars apart
-  suppressed a genuine -3% jump (4/5 -> 5/5 seeds after the escalation rule; regression test included).
-  The `zscore_fixed3` baseline keeps the classic plain cooldown on purpose.
-- **Weak spots seen so far (synthetic):** a subtle 40-bar drift of -2 sigma/bar is caught in only
-  2/5 seeds by every method, and the learned ensemble is not better than the fixed one.
-  Escalation is a heuristic (factor 10), not tuned; ablate it in the real-data study.
-- Event windows in `eval/events.example.json` are day-level and approximate; onsets are
-  labelled with hindsight. Latency is only as good as those labels. 3-5 events give
-  no statistical significance; report them as case studies.
-- "Precision" is a lower bound: unlabelled but real anomalies outside the windows count as false alarms.
-- Historical L2 order-book data is not freely available, so the order-book detector can
-  only be evaluated on live data you record yourself. The replay uses trades/klines only.
-- Weak labels are a proxy. The learned weights can only be as good as that proxy.
-- The adaptive threshold lets a very long anomaly raise its own threshold.
-- Volume has no intraday-seasonality adjustment; replay assumes minute bars without gaps.
-- **Next.js UI is unverified.** I could not run `npm install`/`next build` where this was written. The pure
-  logic (aggregator, socket, host, alerts, engine) is unit-tested; the React/lightweight-charts code was only
-  type-checked against stubs. Expect small fixes on first `npm run build` (CI runs it).
-- Coinbase has no order-book detector yet (would need a level2 book). Binance order-book imbalance uses
-  partial-depth snapshots timestamped with the local clock (no exchange event time on that stream).
-- Alerts fire only while a dashboard tab is open; 24/7 alerting needs a small always-on worker
-  (Railway/Fly/Render). The route's rate limiter is in-memory, per serverless instance.
-- The page is public by default: anyone can view it and run their own session. Only the alert route is key-protected.
-- Research software, not a trading signal, not financial advice.
-
-## Roadmap
-
-2. ~~Aggregator, feeds, Worker host, dashboard, alert route~~ (done; needs first real build + live smoke test).
-3. Real-data results, ablations (each detector removed), cooldown-escalation fix,
-   calibration / Brier reporting, 4-page writeup in `docs/`.
+A clearly labelled **exploratory v2**, designed after seeing the results above: a trailing-reference onset rule, recall-versus-realised-alert-rate curves with paired skill intervals, a held-out set of events (the next 40 ranked days), subtle events such as volatility regime shifts, a longer warm-up for the learned variant, and recorded live level-2 data to test the order-book detector.
