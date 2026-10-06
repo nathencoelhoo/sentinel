@@ -4,7 +4,7 @@ import { AdaptiveThreshold } from '../src/engine/threshold.ts';
 import { mulberry32, randn } from '../src/sim/rng.ts';
 import { selectEvents } from '../eval/study-lib.ts';
 import type { DailyRow } from '../eval/study-lib.ts';
-import { alertsForBudgets, onsetV2, outcomesForSlice, quietFlags, rankRegimeDays, recallAtRate, splitShockPicks } from '../eval/study2-lib.ts';
+import { alertsForBudgets, onsetV2, outcomesForSlice, quietFlags, rankRegimeDays, recallAtRate, scorerSpecs, splitShockPicks } from '../eval/study2-lib.ts';
 import type { Study2Config } from '../eval/study2-lib.ts';
 
 const T0 = Date.UTC(2024, 0, 1);
@@ -105,4 +105,31 @@ test('outcomesForSlice: detection, latency and quiet false alarms', () => {
   assert.equal(o.latencyMin, 0);
   assert.ok(o.fa >= 1);
   assert.ok(Math.abs(o.quietDays - (n - 601) / 1440) < 1e-9);
+});
+
+test('scorerSpecs: default set is unchanged; --solo appends one baseline per required detector', () => {
+  const base = scorerSpecs().map((x) => x.name);
+  const ext = scorerSpecs({ solo: true }).map((x) => x.name);
+  assert.equal(base.length, 8);
+  assert.deepEqual(ext.slice(0, 8), base); // existing methods and their order are untouched
+  assert.deepEqual(ext.slice(8), ['solo_robust_z', 'solo_ewma_vol', 'solo_cusum', 'solo_bocpd', 'solo_volume_spike']);
+});
+
+test('a solo scorer really uses only its detector and becomes ready', () => {
+  const spec = scorerSpecs({ solo: true }).find((x) => x.name === 'solo_ewma_vol')!;
+  const score = spec.make('SIM');
+  const rng = mulberry32(5);
+  let p = 100;
+  let ready = 0;
+  let maxS = 0;
+  for (let i = 0; i < 700; i++) {
+    p *= Math.exp(0.0005 * randn(rng));
+    const r = score({ t: T0 + i * 60_000, open: p, close: p, volume: 1 });
+    if (r.ready) {
+      ready++;
+      maxS = Math.max(maxS, r.s);
+      assert.ok(r.s >= 0 && r.s <= 1);
+    }
+  }
+  assert.ok(ready > 300 && maxS > 0);
 });

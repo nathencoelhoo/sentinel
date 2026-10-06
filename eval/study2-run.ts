@@ -15,6 +15,7 @@ const { values } = parseArgs({
     events: { type: 'string', default: 'eval/events.v2.json' },
     data: { type: 'string', default: 'data' },
     out: { type: 'string', default: 'results/study2' },
+    solo: { type: 'boolean', default: false },
   },
 });
 const MIN = 60_000;
@@ -26,7 +27,7 @@ const file = JSON.parse(readFileSync(values.events as string, 'utf8')) as {
 };
 const events = file.events.map((e) => ({ ...e, startMs: Date.parse(e.start), endMs: Date.parse(e.end) }));
 
-const specs = scorerSpecs();
+const specs = scorerSpecs({ solo: values.solo });
 const all: MethodOutcomes[] = specs.map((s) => ({ method: s.name, byBudget: cfg.budgets.map(() => []) }));
 const windows: ChanceWindow[] = [];
 const used: { id: string; symbol: string; date: string; cls: string; onset: number; inProgress: boolean; theta: number; rangePct: number }[] = [];

@@ -60,7 +60,7 @@ test('study2-run: full pipeline on fixtures (fresh onsets, budget sweep, matched
   const cfgPath = join(root, 'study2.json');
   writeFileSync(cfgPath, JSON.stringify(baseCfg));
   const out = join(root, 'results');
-  const stdout = run(['eval/study2-run.ts', '--config', cfgPath, '--events', evPath, '--data', join(root, 'data'), '--out', out]);
+  const stdout = run(['eval/study2-run.ts', '--config', cfgPath, '--events', evPath, '--data', join(root, 'data'), '--out', out, '--solo']);
   assert.match(stdout, /done SIMX-2024-01-09 \[heldout\]/);
   assert.ok(existsSync(join(out, 'summary.md')));
   const s = JSON.parse(readFileSync(join(out, 'summary.json'), 'utf8'));
@@ -68,7 +68,8 @@ test('study2-run: full pipeline on fixtures (fresh onsets, budget sweep, matched
   assert.ok(s.used.every((u: { inProgress: boolean }) => u.inProgress === false));
   const held = s.subsets.find((x: { name: string }) => x.name === 'heldout_fresh');
   assert.equal(held.n, 5);
-  assert.equal(Object.keys(held.cells).length, 8); // zscore + fixed + learned + 5 ablations
+  assert.equal(Object.keys(held.cells).length, 13); // zscore + fixed + learned + 5 ablations + 5 solo
+  assert.ok(held.cells.solo_cusum[0].vsFull !== undefined, 'solo rows are compared with the full ensemble');
   const nom = held.nominal.sentinel_fixed;
   assert.ok(nom.recall.est >= 0.6, `nominal recall ${nom.recall.est}`);
   assert.equal(held.curves.sentinel_fixed.length, baseCfg.budgets.length);
@@ -77,4 +78,5 @@ test('study2-run: full pipeline on fixtures (fresh onsets, budget sweep, matched
   const md = readFileSync(join(out, 'summary.md'), 'utf8');
   assert.match(md, /Primary endpoint/);
   assert.match(md, /matched realised/i);
+  assert.match(md, /Post-hoc extension \(v2b\)/);
 });

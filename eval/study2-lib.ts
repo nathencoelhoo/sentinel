@@ -137,20 +137,20 @@ export interface ScorerSpec {
 }
 
 /** Methods record a raw anomaly score per bar; alert policies are applied afterwards, identically for all methods. */
-export function scorerSpecs(): ScorerSpec[] {
+export function scorerSpecs(opts: { solo?: boolean } = {}): ScorerSpec[] {
   const base = { barSeconds: 60, alarmsPerDay: 6 };
-  const sentinel = (name: string, ensemble: 'fixed' | 'learned', drop?: string): ScorerSpec => ({
+  const sentinel = (name: string, ensemble: 'fixed' | 'learned', keep: (detectorName: string) => boolean): ScorerSpec => ({
     name,
     make: (sym) => {
-      const dets = drop ? defaultDetectors().filter((d) => d.name !== drop) : defaultDetectors();
-      const e = new SentinelEngine(defaultConfig(sym, { ...base, ensemble }), dets);
+      const e = new SentinelEngine(defaultConfig(sym, { ...base, ensemble }), defaultDetectors().filter((d) => keep(d.name)));
       return (b) => {
         const o = e.update(b);
         return { ready: o.ready, s: o.p };
       };
     },
   });
-  return [
+  const required = defaultDetectors().filter((d) => !d.optional).map((d) => d.name);
+  const specs: ScorerSpec[] = [
     {
       name: 'zscore_matched',
       make: () => {
@@ -161,12 +161,13 @@ export function scorerSpecs(): ScorerSpec[] {
         };
       },
     },
-    sentinel('sentinel_fixed', 'fixed'),
-    sentinel('sentinel_learned', 'learned'),
-    ...defaultDetectors()
-      .filter((d) => !d.optional)
-      .map((d) => sentinel(`sentinel_without_${d.name}`, 'fixed', d.name)),
+    sentinel('sentinel_fixed', 'fixed', () => true),
+    sentinel('sentinel_learned', 'learned', () => true),
+    ...required.map((n) => sentinel(`sentinel_without_${n}`, 'fixed', (d) => d !== n)),
   ];
+  // Post-hoc extension (v2b): each detector ALONE, through the identical normalisation and alert pipeline.
+  if (opts.solo) for (const n of required) specs.push(sentinel(`solo_${n}`, 'fixed', (d) => d === n));
+  return specs;
 }
 
 export interface Series {
@@ -338,7 +339,7 @@ export function summarizeSubset(
     cells[m.method] = cfg.targetRates.map((r) => {
       const cell: Cell = { rate: r, recall: bootstrapClusters(ids, (p) => matchedRecall(m, r, sel(p)), B, next()) };
       if (ref && ref !== m) cell.vsRef = bootstrapClusters(ids, (p) => matchedRecall(m, r, sel(p)) - matchedRecall(ref, r, sel(p)), B, next());
-      if (full && full !== m && (m.method.startsWith('sentinel_without_') || m.method === 'sentinel_learned')) {
+      if (full && full !== m && (m.method.startsWith('sentinel_without_') || m.method.startsWith('solo_') || m.method === 'sentinel_learned')) {
         cell.vsFull = bootstrapClusters(ids, (p) => matchedRecall(m, r, sel(p)) - matchedRecall(full, r, sel(p)), B, next());
       }
       return cell;
@@ -381,6 +382,10 @@ export function toStudy2Markdown(
   L.push(`Config hash \`${meta.configHash.slice(0, 12)}\`, commit \`${meta.sha.slice(0, 10)}\`.`, '');
   L.push('Events: ' + Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ') + '.', '');
   L.push(`Onset = first minute whose |${cfg.onsetWindowMin}-min return| >= ${cfg.onsetMultiple} x the median over the ${cfg.onsetRefDays} days before the event day. "Fresh" = not already above that level at 00:00 UTC. Detection = alert within [onset - ${cfg.detectLeadMin}, onset + ${cfg.detectLagMin}] min. Alert policy and budget sweep are identical for every method; recall is compared at a MATCHED realised quiet-period alert rate by interpolating each method's recall-vs-rate curve. 95% cluster-bootstrap intervals (clusters = calendar day), ${cfg.bootstrapResamples} resamples.`, '');
+  const hasSolo = subsets.length > 0 && Object.keys(subsets[0].cells).some((m) => m.startsWith('solo_'));
+  if (hasSolo) {
+    L.push('**Post-hoc extension (v2b).** The `solo_*` rows (each detector alone, same normalisation and alert pipeline) were added after seeing the v2 results. They are descriptive, were not part of the stated plan, and all five are reported, not only the best. In the component tables, a negative difference for a `solo_*` row means that detector alone has LOWER recall than the full ensemble.', '');
+  }
   const prim = subsets.find((s) => s.name === 'heldout_fresh');
   if (prim) {
     const k = cfg.targetRates.indexOf(cfg.primaryRate);

@@ -44,3 +44,13 @@ Drift events (slow trends) and level-2 order-book data (no free history). A live
 
 ## Reproduce
 Actions > `study2` workflow > Run workflow. Tables appear on the run summary; full results are attached as an artifact.
+
+## v2b: single-detector baselines (post-hoc extension)
+Added AFTER the v2 results were seen, because the primary endpoint was positive and the obvious next question is whether the
+ensemble beats its own components. Five baselines `solo_<detector>` run each detector ALONE through exactly the same pipeline
+(rolling-ECDF normalisation, one-feature logistic, adaptive threshold, cooldown, escalation) on the same events, with the same
+onset rule, budget sweep and statistics. All five are reported, not only the best (picking the best afterwards would inflate it).
+There is no decision rule: this is descriptive. Reading guide: if the full ensemble is clearly above every single detector, the
+gain is attributable to combining them; if a single detector matches it, the gain comes from the shared normalisation and
+alert policy rather than from ensembling. The v2 analysis (all other rows) is reproduced unchanged by the same run.
+Run via the `study2b` workflow (`--solo`, output in results/study2b).
