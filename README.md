@@ -1,27 +1,32 @@
 # SENTINEL
 
-Real-time anomaly detection for crypto markets, with a pre-registered evaluation of whether it actually works.
+Real-time anomaly detection for crypto markets, with a pre-registered study and an exploratory follow-up testing whether it actually works.
 
 **Live demo:** https://sentinel-one-phi.vercel.app &nbsp;·&nbsp; **Paper:** [docs/SENTINEL_paper.pdf](docs/SENTINEL_paper.pdf) &nbsp;·&nbsp; Research software, not financial advice.
 
-## Headline result
+## Headline results
 
-At a nominal alarm budget of 6 alerts/day, on 40 BTC/ETH stress days (2020 to 2026) chosen by a rule fixed in advance:
+Two evaluations on Binance BTCUSDT and ETHUSDT 1-minute data (2020 to 2026): **Study 1** (pre-registered, 40 stress days) and **Study 2** (exploratory follow-up designed after Study 1, 119 new events).
 
-- SENTINEL emitted **clearly fewer alerts** than an equally thresholded z-score: 4.8 vs 6.7 per quiet day (paired difference -1.86, 95% CI -2.31 to -1.42).
-- Event recall **did not clearly change** (-0.03, 95% CI -0.14 to +0.08).
-- **No evidence of earlier detection.** Online-learned weights were no better than fixed ones, and removing any single detector had no clear effect.
-- Recall above a random alerter at the same alert rate is small (+0.06) and unproven. The classic |z| > 3 rule reaches 0.82 recall, exactly what chance gives at its 14 alerts/day.
+**Supported**
+- **Fewer alerts at the same nominal budget.** At 6 alerts/day, 4.8 vs 6.7 quiet-period alerts per day against an equally thresholded z-score (Study 1: -1.86 per day, 95% CI -2.31 to -1.42); 4.90 vs 5.81 in Study 2.
+- **Higher recall at a matched alert rate on held-out shocks** (the primary endpoint, stated in advance). At 5 alerts/day on 55 held-out shocks: recall 0.87 vs 0.72 for the z-score, a difference of **+0.15 (95% CI 0.06 to 0.26)**; a random alerter reaches 0.42.
 
-The supported claim is about alert volume, not detection skill. Protocol, tables, limitations and the full event list are in the paper and in [docs/STUDY.md](docs/STUDY.md).
+**Not shown**
+- Earlier detection (no latency difference), a benefit on 58 volatility-regime days (+0.06, CI -0.03 to 0.15), or a benefit from the online-learned weights.
+
+**Not established**
+- That *ensembling* is the cause. Post-hoc single-detector baselines show the ensemble clearly beats three of its five components (robust z, EWMA volatility and changepoint detection alone), but CUSUM alone and volume-spike alone are within noise of it (-0.07 and -0.05, intervals include 0).
+
+The supported claim is an advantage over a naive z-score on large shocks, not detection skill in general and not trading value. The paper gives the protocol, all tables, and the limitations.
 
 ## What is here
 
-- **Streaming engine** (TypeScript, causal, unit-tested): robust z-score, EWMA volatility ratio, CUSUM, Bayesian online changepoint detection, volume spike, and order-book imbalance (live only). Each statistic is normalised by a rolling empirical CDF, combined by a logistic ensemble (fixed prior or online-learned from delayed weak labels), and turned into alerts by per-symbol adaptive quantile thresholds with a cooldown and severity escalation. Cross-asset lead-lag tracking.
-- **Live dashboard** (Next.js; runs in your browser): Binance and Coinbase WebSockets, a Web Worker engine, price chart with anomaly score, heatmap across symbols, a "why did this fire" panel, and throughput / latency metrics.
+- **Streaming engine** (TypeScript, causal, tested): robust z-score, EWMA volatility ratio, CUSUM, Bayesian online changepoint detection, volume spike, and order-book imbalance (live only). Each statistic is normalised by a rolling empirical CDF, combined by a logistic ensemble (fixed prior or online-learned from delayed weak labels), and turned into alerts by per-symbol adaptive quantile thresholds with a cooldown and severity escalation. Cross-asset lead-lag tracking.
+- **Live dashboard** (Next.js, runs in your browser): Binance and Coinbase WebSockets, a Web Worker engine, price chart with anomaly score, heatmap, a "why did this fire" panel, throughput and latency metrics.
 - **Alert route** (`/api/alert`): Telegram and Discord messages. Fails closed, validates input, plain text only.
-- **Replay and study harness**: a pre-registered evaluation with a random-alert chance baseline, cluster-bootstrap intervals and paired comparisons, run on GitHub Actions.
-- **57 automated tests**, including one asserting that two engines fed different futures give identical past outputs (no lookahead).
+- **Study harness**: random-alert chance baseline, comparison at matched realised alert rates, cluster-bootstrap intervals and paired comparisons, all run on GitHub Actions.
+- **67 automated tests**, including one asserting that two engines fed different futures give identical past outputs (no lookahead).
 
 ## Architecture
 
@@ -46,13 +51,21 @@ The same `SentinelEngine.update(bar)` runs live and in replay, so there is no tr
   ```bash
   npm install
   npm run dev      # http://localhost:3000
-  npm test         # 57 tests
+  npm test         # 67 tests
   ```
 - **Deploy:** import the repo on Vercel (Next.js is detected automatically). The alert route stays disabled until you set `ALERT_API_KEY` (and Telegram or Discord variables, see `.env.example`).
 
-## Reproduce the study
+## Reproduce the studies
 
-No local setup needed. In the repo open **Actions**, choose the **study** workflow and press **Run workflow**. It runs the tests, applies the event rule to Binance Vision daily data, downloads the 1-minute files for the 40 events, replays every method, and prints the tables on the run summary. The frozen parameters are in [`eval/study.json`](eval/study.json); the results record its hash and the commit.
+No local setup needed. In the repo open **Actions**, pick a workflow and press **Run workflow**; tables appear on the run summary and full results are attached as an artifact.
+
+| Workflow | What it reproduces |
+|---|---|
+| `study` | Study 1 (pre-registered, 40 events) |
+| `study2` | Study 2 (exploratory follow-up, matched alert rates, held-out events) |
+| `study2b` | Study 2 plus the post-hoc single-detector baselines; reproduces every Study 2 number unchanged |
+
+Frozen parameters: [`eval/study.json`](eval/study.json) and [`eval/study2.json`](eval/study2.json). Protocols: [docs/STUDY.md](docs/STUDY.md) and [docs/STUDY2.md](docs/STUDY2.md). Each result records the configuration hash and commit.
 
 ## Repository layout
 
@@ -62,17 +75,16 @@ No local setup needed. In the repo open **Actions**, choose the **study** workfl
 | `src/feeds/` | aggregator, reconnecting socket, parsers, history, queue |
 | `src/worker/` | host and Web Worker entry |
 | `src/app/`, `src/components/`, `src/lib/` | dashboard and alert route |
-| `eval/` | replay harness, study selection and runner, statistics |
-| `tests/` | 57 unit and end-to-end tests |
-| `docs/` | study protocol and paper |
+| `eval/` | replay harness, study selection and runners, statistics |
+| `tests/` | 67 unit and end-to-end tests |
+| `docs/` | study protocols and the paper |
 
 ## Limitations
 
-- At the same nominal budget the methods produced different realised alert rates (4.8 vs 6.7 per day), so the alert-volume and recall results are not a like-for-like comparison. Matched-rate comparisons are the first item for v2.
-- The study's onset rule anchors on the UTC day open; in 22 of 40 events the onset falls within 30 minutes after midnight, which adds noise for every method.
-- The 40 events are the largest-range days, strongly correlated across BTC and ETH, so the study speaks to obvious shocks, not subtle regime changes.
-- The order-book detector could not be tested historically (no free historical level-2 data) and runs only in the live dashboard.
-- Alerts fire only while a dashboard tab is open. The pre-registration is a hashed commit in the author's own repository, not a third-party registry.
+- **Exploratory follow-up.** Study 2 was designed after Study 1 and the single-detector baselines after Study 2's results. Only the primary endpoint has a pre-stated decision rule; dozens of other comparisons are uncorrected for multiplicity. The pre-registration is a hashed commit in the author's own repository, not a third-party registry.
+- **Small, correlated sample.** BTC and ETH shocks move together; the bootstrap resamples days, but intervals are wide. Events are the largest-range days, so results concern obvious shocks, not slow drifts.
+- **Measurement.** Quiet-period alert rates are upper bounds on false alarms; matched-rate recall uses linear interpolation; the onset rule was reasoned, not tuned, and its sensitivity is untested; latency resolution is one minute.
+- **Scope.** One exchange, two assets, 1-minute bars. The order-book detector could not be tested historically (no free level-2 history) and runs only in the live dashboard. Alerts fire only while a dashboard tab is open.
 
 ## Data, credits and licence
 
@@ -83,4 +95,4 @@ No local setup needed. In the repo open **Actions**, choose the **study** workfl
 
 ## What is next
 
-A clearly labelled **exploratory v2**, designed after seeing the results above: a trailing-reference onset rule, recall-versus-realised-alert-rate curves with paired skill intervals, a held-out set of events (the next 40 ranked days), subtle events such as volatility regime shifts, a longer warm-up for the learned variant, and recorded live level-2 data to test the order-book detector.
+A confirmatory **Study 3**, fixed in advance: the full ensemble against CUSUM-alone and volume-spike-alone as the named comparators; strictly out-of-time events accumulated after the Study 2 cut-off; more assets and exchanges; drift events; stronger baselines (for example GARCH-based or isolation-forest detectors); and a labelled set of non-event periods so that precision, not only recall at a matched alert rate, can be measured.
