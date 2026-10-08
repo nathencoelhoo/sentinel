@@ -10,8 +10,7 @@ export const DEFAULT_SYMBOLS = [
   'binance:SOLUSDT',
   'binance:BNBUSDT',
   'binance:XRPUSDT',
-  'coinbase:BTC-USD',
-  'coinbase:ETH-USD',
+  
 ];
 
 export interface Pt {
